@@ -151,9 +151,17 @@ namespace Neat
                 //Evolution
                 Population pN;
 
+                pN.maxNode = p.maxNode;
+
                 for (const auto& s : p.species)
                 {
-
+                    //TODO remove
+                    for (const auto& g : s.genomes)
+                    {
+                        mutateWeight(g);
+                        mutateAddConnection(g);
+                        mutateAddNode(g, pN.maxNode);
+                    }
                 }
                 //Speciation
                 //Mutation (Weights, Enabled/Disable, Nodes, Connections)
@@ -170,11 +178,12 @@ namespace Neat
         {
             Genome result(genome);
             
-            auto it = (result.genes.begin() + getRandomInt(result.genes.size()));
+            //TODO this not working probably means I should change specialization map to be a vector
+            auto& gene = *(result.genes.begin() + getRandomInt(result.genes.size()));
 
-            it->weight =
+            gene.second.weight =
                 getRandomFloat() < perturbChance
-                ? it->weight * (1.0f + (getRandomFloat() - 0.5f) * perturbAmount)
+                ? gene.second.weight * (1.0f + (getRandomFloat() - 0.5f) * perturbAmount)
                 : 2.0f * (getRandomFloat() - 0.5f);
 
             return result;
@@ -189,17 +198,23 @@ namespace Neat
             return result;
         }
 
-        Genome mutateAddNode(const Genome& genome)
+        //NOTE this manipulates maxNode
+        Genome mutateAddNode(const Genome& genome, TNode& maxNode)
         {
             Genome result(genome);
 
-            //TODO
+            auto& gene = *(genome.genes.begin() + getRandomInt(result.genes.size()));
+
+            gene.second.enabled = false;
+
+            genome.genes[std::pair<TNode, TNode>(gene.first.first, maxNode)] = { 1.0f, true };
+            genome.genes[std::pair<TNode, TNode>(maxNode, gene.first.second)] = { gene.second.weight, true };
 
             return result;
         }
 
         //TODO maybe swap cycle and Neat-based compatibility check and just make this the loop body of the species insertion,
-        //	   then I don't have to deal with inserting the nodes into the species node vector.
+        //	   then I don't have to deal with inserting the nodes into the species node vector again, since i already do it in the neat compatibility check
         bool isCompatible(const Genome& genome, const Species& species)
         {
             //checking for cycles
