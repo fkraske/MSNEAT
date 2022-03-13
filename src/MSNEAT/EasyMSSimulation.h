@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Simulation.h"
+#include <NEAT/Simulation.h>
 
 namespace MSSolve
 {

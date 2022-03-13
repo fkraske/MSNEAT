@@ -1,7 +1,6 @@
 #include <iostream>
 
-#include "EasyMSSimulation.h"
-#include "Board.h"
+#include <MSNEAT/EasyMSSimulation.h>
 
 int main()
 {
