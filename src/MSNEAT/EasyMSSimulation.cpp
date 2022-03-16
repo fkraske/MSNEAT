@@ -20,17 +20,29 @@ float MSSolve::EasyMSSimulation::evaluateFitness(const NetworkConfiguration& net
     return std::accumulate(out.begin(), out.end(), 0.0f, [](auto a, auto b) { return a + b; });
 }
 
-bool MSSolve::EasyMSSimulation::trainingFinishCondition(const Snapshot& snapshot)
+bool MSSolve::EasyMSSimulation::shouldFinishTraining(const Snapshot& snapshot)
 {
-    return true;
+    return snapshot.generation > 10000;
 }
 
 MSSolve::EasyMSSimulation::EasyMSSimulation() : Neat::Simulation<900, 100, std::uint32_t>(
     300,
     std::random_device()(),
+    1.0f,
+    0.4f,
+    3.0f,
+    20,
+    15,
+    5,
+    0.5f,
+    0.8f,
     0.9f,
     0.1f,
-    3.0f,
     1.0f,
+    0.75f,
+    0.25f,
+    0.001f,
+    0.03f,
+    0.05f,
     1.0f
 ) { }

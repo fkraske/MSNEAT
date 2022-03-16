@@ -10,7 +10,7 @@ namespace MSSolve
         virtual std::array<float, 900> getNetworkInput() override;
         virtual float activation(float f) override;
         virtual float evaluateFitness(const NetworkConfiguration& network) override;
-        virtual bool trainingFinishCondition(const Snapshot& snapshot) override;
+        virtual bool shouldFinishTraining(const Snapshot& snapshot) override;
 
     public:
         EasyMSSimulation();
