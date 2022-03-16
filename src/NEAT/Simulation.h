@@ -8,6 +8,7 @@
 
 #include "definitions.h"
 #include "hashes.h"
+#include "PerformanceData.h"
 
 //TODO bias (additional input node with constant 1 input)
 namespace Neat
@@ -92,8 +93,8 @@ namespace Neat
 		float connectionEnableChance;
 		float survivalChance;
 		float interspeciesMatingChance;
-		float newNodeMutation;
-		float newLinkMutation;
+		float addNodeChance;
+		float addConnectionChance;
 		float initialWeightSpread;
 
 		// Constructors, Destructors, Methods
@@ -115,8 +116,8 @@ namespace Neat
 			float connectionEnableChance,
 			float survivalChance,
 			float interspeciesMatingChance,
-			float newNodeMutation,
-			float newLinkMutation,
+			float addNodeChance,
+			float addConnectionChance,
 			float initialWeightSpread
 		) :
 			populationSize(populationSize),
@@ -136,8 +137,8 @@ namespace Neat
 			connectionEnableChance(connectionEnableChance),
 			survivalChance(survivalChance),
 			interspeciesMatingChance(interspeciesMatingChance),
-			newNodeMutation(newNodeMutation),
-			newLinkMutation(newLinkMutation),
+			addNodeChance(addNodeChance),
+			addConnectionChance(addConnectionChance),
 			initialWeightSpread(initialWeightSpread)
 		{ }
 
@@ -195,12 +196,13 @@ namespace Neat
 						mutateEnableConnection(g);
 						mutateAddConnection(g, s, pN.maxNode);
 						mutateAddNode(g, pN.maxNode);
-						mutateCrossover(g, g);
+						crossover(g, g);
 					}
 					//TODO stale population
 					//TODO stale species
 					//TODO culling
 					//TODO champion survival
+					//TODO crossover
 					//TODO mutation
 				}
 
@@ -291,7 +293,7 @@ namespace Neat
 			return result;
 		}
 
-		Genome mutateCrossover(const Genome& first, const Genome& second)
+		Genome crossover(const Genome& first, const Genome& second)
 		{
 			Genome result;
 
