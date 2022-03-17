@@ -5,52 +5,172 @@
 #include <numeric>
 #include <random>
 #include <ranges>
-
-#include "definitions.h"
-#include "hashes.h"
-#include "PerformanceData.h"
+#include <unordered_set>
+#include <unordered_map>
+#include <vector>
 
 //TODO bias (additional input node with constant 1 input)
 namespace Neat
 {
-	template <size_t TinCount, size_t ToutCount, std::unsigned_integral TNode>
+	template <std::unsigned_integral TInnovation, TInnovation TinCount, TInnovation ToutCount>
 	class Simulation
 	{
 		// Types
 	protected:
+		using NodeID = TInnovation;
+		using ConnectionID = TInnovation;
+		using Edge = std::pair<NodeID, NodeID>;
 		using GenerationCount = std::uint64_t;
-		//TODO is this necessary?
 		using Fitness = float;
 
-		//TODO rethink classes
-		struct Genome
+		struct ConnectionData
 		{
-			SpecializationMap<TNode> genes;
-			Fitness fitness; //TODO this shouldn't be in here
+			TInnovation innovation;
+			float weight;
+			bool enabled;
+		};
+
+		using ConnectionMap = std::unordered_map<NodeID, std::unordered_map<NodeID, ConnectionData>>;
+
+		struct Network
+		{
+			std::vector<NodeID> nodes;
+			ConnectionMap connections;
+			Fitness fitness;
+
+			inline bool containsEdge(NodeID in, NodeID out) const
+			{
+				return connections.contains(out) && connections.at(out).contains(in);
+			}
+
+			inline bool containsEdge(Edge edge) const
+			{
+				return containsEdge(edge.first, edge.second);
+			}
+
+			inline bool containsEdgeWithInnovation(NodeID in, NodeID out, ConnectionID innovation) const
+			{
+				return containsEdge(in, out) && connections[out][in].innovation == innovation;
+			}
+
+			inline bool containsEdgeWithInnovation(Edge edge, ConnectionID innovation) const
+			{
+				return containsEdgeWithInnovation(edge.first, edge.second, innovation);
+			}
+
+			bool containsIndirectReverseConnection(
+				std::vector<NodeID>::reverse_iterator inIt,
+				std::vector<NodeID>::reverse_iterator outIt
+			) const
+			{
+				for (auto it = inIt + 1; it < outIt; ++it)
+					if (containsEdge(*it, *inIt))
+						return containsIndirectReverseConnection(it, outIt);
+
+				return containsEdge(*outIt, *inIt);
+			}
+
+			auto getEdges()
+			{
+				return connections | std::views::transform(
+					[](const auto& e) {
+						return e.second | std::views::transform(
+							[&e](const auto& f) {
+								return Edge(f.first, e.first);
+							});
+					})
+					| std::views::join;
+			}
+
+			const auto getEdges() const
+			{
+				return connections | std::views::transform(
+					[](const auto& e) {
+						return e.second | std::views::transform(
+							[&e](const auto& f) {
+								return Edge(f.first, e.first);
+							});
+					})
+					| std::views::join;
+			}
+
+			bool isCompatible(const Network& other)
+			{
+				auto flattened = getEdges();
+				auto otherFlattened = other.getEdges();
+
+				std::uint32_t ED =
+					std::accumulate(
+						flattened.begin(),
+						flattened.end(),
+						0,
+						[&other](auto acc, const auto& e)
+						{
+							return acc + other.containsEdge(e);
+						}
+					)
+					+ std::accumulate(
+						flattened.begin(),
+						flattened.end(),
+						0,
+						[this](auto acc, const auto& e)
+						{
+							return acc + containsEdge(e);
+						}
+					);
+
+				std::uint32_t N = std::max(genome.genes.size(), species.genomes[0].genes.size());
+
+				float W = std::accumulate(
+					genome.genes.begin(),
+					genome.genes.end(),
+					0.0f,
+					[&species](auto acc, const auto& entry)
+					{
+						return
+							species.genomes[0].genes.contains(entry.first)
+							? acc + std::abs(species.genomes[0].genes[entry.first].weight - entry.second.weight)
+							: acc;
+					}
+				);
+
+				return c12 * ED / N + c3 * W <= deltaT;
+			}
 		};
 
 		struct Species
 		{
-			std::vector<Genome> genomes;
-
-			std::vector<TNode> hiddenNodes;
-			std::vector<Connection<TNode>> connections;
-
-			Fitness fitness; //TODO this shouldn't be in here
+			std::vector<Network> networks;
+			Fitness fitness;
 		};
 
 		struct Population
 		{
-			TNode maxNode;
-			ConnectionMap<TNode> connections;
-
 			std::vector<Species> species;
 
-			Fitness lastFitness; //TODO this shouldn't be in here
+			NodeID maxNodeID;
+			ConnectionID maxConnectionID;
+			std::unordered_map<ConnectionID, NodeID> nodeInnovations;
+			std::unordered_map<Edge, ConnectionID> edgeInnovations;
+
+			Fitness highestFitness; //TODO this shouldn't be in here?
+			Fitness previousHighestFitness;
 			std::uint16_t staleGenerations;
 
-			Population(TNode maxNode) : maxNode(maxNode), connections(), species() { }
-			Population(const std::vector<Species>& species) : maxNode(ToutCount + TinCount + 1), connections(), species(species) { }
+			inline NodeID getNodeInnovation(ConnectionID connection)
+			{
+				return nodeInnovations.contains(connection) ? nodeInnovations[connection] : nodeInnovations[connection] = maxNodeID++;
+			}
+
+			inline ConnectionID getConnectionInnovation(Edge edge)
+			{
+				return edgeInnovations.contains(edge) ? edgeInnovations[edge] : edgeInnovations[edge] = maxConnectionID++;
+			}
+
+			inline ConnectionID getConnectionInnovation(NodeID in, NodeID out)
+			{
+				return getConnectionInnovation(Edge(in, out));
+			}
 		};
 
 		struct Snapshot
@@ -59,18 +179,11 @@ namespace Neat
 			Population& population;
 		};
 
-		struct NetworkConfiguration
-		{
-			const std::vector<TNode>& speciesHiddenNodes;
-			const ConnectionMap<TNode>& populationConnections;
-			const SpecializationMap<TNode>& genomeGenes;
-		};
-
 	public:
 		//TODO
 		struct TrainingResult
 		{
-
+			std::vector<Network> networks;
 		};
 
 
@@ -144,7 +257,7 @@ namespace Neat
 
 		virtual std::array<float, TinCount> getNetworkInput() = 0;
 		virtual float activation(float f) = 0;
-		virtual Fitness evaluateFitness(const NetworkConfiguration& network) = 0;
+		virtual Fitness evaluateFitness(const Network& network) = 0;
 		virtual bool shouldFinishTraining(const Snapshot& snapshot) = 0;
 
 		inline float getRandomFloat()
@@ -166,7 +279,8 @@ namespace Neat
 		TrainingResult train()
 		{
 			GenerationCount generation = 1;
-			auto pp = std::make_unique<Population>(Population(std::vector{ Species{ std::vector{ Genome{ } } } }));
+			//TODO proper initialization
+			auto pp = std::make_unique<Population>(Population{});
 
 			while (true) {
 				Population& p = *pp;
@@ -174,9 +288,9 @@ namespace Neat
 				//Fitness calculation
 				Snapshot snapshot{ generation, p };
 
-				for (auto& s : p.species)
-					for (auto& g : s.genomes)
-						s.fitness += g.fitness = evaluateFitness({ s.hiddenNodes, p.connections, g.genes }) / s.genomes.size();
+				//for (auto& s : p.species)
+				//	for (auto& g : s.genomes)
+				//		s.fitness += g.fitness = evaluateFitness({ s.hiddenNodes, p.connections, g.genes }) / s.genomes.size();
 
 				//Loop Condition
 				if (shouldFinishTraining(snapshot))
@@ -185,18 +299,18 @@ namespace Neat
 				++generation;
 
 				//Evolution
-				Population pN(p.maxNode);
+				Population pN;
 
 				for (const auto& s : p.species)
 				{
 					//TODO remove
-					for (const auto& g : s.genomes)
+					for (const auto& n : s.networks)
 					{
-						mutateWeight(g);
-						mutateEnableConnection(g);
-						mutateAddConnection(g, s, pN.maxNode);
-						mutateAddNode(g, pN.maxNode);
-						crossover(g, g);
+						mutateWeight(n);
+						mutateEnableConnection(n);
+						mutateAddConnection(pN, n);
+						mutateAddNode(pN, n);
+						//crossover(g, g);
 					}
 					//TODO stale population
 					//TODO stale species
@@ -216,165 +330,98 @@ namespace Neat
 
 		//Mutations
 
-		Genome mutateWeight(const Genome& genome)
+		Network mutateWeight(const Network& network)
 		{
-			Genome result(genome);
+			Network result(network);
+			Edge e = getRandomEdge(result);
+			ConnectionData& c = result.connections[e.second][e.first];
 
-			auto it = std::next(result.genes.begin(), getRandomInt(result.genes.size()));
-
-			it->second.weight =
+			c.weight =
 				getRandomFloat() < perturbChance
-				? it->second.weight * (1.0f + (getRandomFloat() - 0.5f) * perturbAmount)
+				? c.weight * (1.0f + (getRandomFloat() - 0.5f) * perturbAmount)
 				: 2.0f * (getRandomFloat() - 0.5f) * randomWeightSpread;
 
 			return result;
 		}
 
-		Genome mutateEnableConnection(const Genome& genome)
+		Network mutateEnableConnection(const Network& network)
 		{
-			Genome result(genome);
+			Network result(network);
+			Edge e = getRandomEdge(result);
 
-			auto v = std::views::filter(result.genes, [](const auto& g) { return !g.second.enabled; });
-			std::next(v.begin(), getRandomInt(std::distance(v.begin(), v.end())))->second.enabled = true;
+			result.connections[e.second][e.first].enabled = true;
 
 			return result;
 		}
 
-		Genome mutateAddConnection(const Genome& genome, const Species& species, TNode maxNode)
+		Network mutateAddConnection(Population& population, const Network& network)
 		{
-			//TODO add the connection to population and species
-			Genome result(genome);
+			Network result(network);
 
-			size_t inNode = getRandomInt(maxNode - ToutCount) + ToutCount;
-			size_t outNode = getRandomInt(maxNode - TinCount - 2);
+			size_t inNode = getRandomInt(result.nodes.size() + TinCount + 1);
+			size_t outNode = getRandomInt(result.nodes.size() + ToutCount - 1);
 
-			if (outNode >= ToutCount)
+			outNode = outNode < result.nodes.size() - 1 ? result.nodes[outNode + (outNode >= inNode)] : outNode - result.nodes.size() + 1;
+			inNode = inNode < result.nodes.size() ? result.nodes[inNode] : inNode - result.nodes.size() + ToutCount;
+
+			if (!result.containsEdge(inNode, outNode))
 			{
-				outNode += TinCount + 1;
-				outNode += (outNode >= inNode);
-			}
+				auto inIt = std::find(result.nodes.rbegin(), result.nodes.rend(), inNode);
+				auto outIt = std::find(result.nodes.rbegin(), result.nodes.rend(), outNode);
 
-			Connection<TNode> c{
-				static_cast<TNode>(inNode),
-				static_cast<TNode>(outNode)
-			};
+				if (inIt < outIt)
+					if (network.containsIndirectReverseConnection(inIt, outIt))
+						std::rotate(inIt, inIt + 1, outIt + 1);
+					else
+						return result;
 
-			if (!result.genes.contains(c))
-			{
-				auto f = std::find(species.hiddenNodes.rbegin(), species.hiddenNodes.rend(), c.first);
-				auto s = std::find(species.hiddenNodes.rbegin(), species.hiddenNodes.rend(), c.second);
-
-				if (f < s)
-					for (auto it = f + 1; it != s; ++it)
-						if (result.genes.contains(std::pair(*it, *s)))
-							return result;
-
-				result.genes[c] = { (1.0f + (getRandomFloat() - 0.5f)) * initialWeightSpread, true };
+				result.connections[outNode][inNode] = {
+					population.getConnectionInnovation({ inNode, outNode }),
+					(1.0f + (getRandomFloat() - 0.5f)) * initialWeightSpread,
+					true
+				};
 			}
 
 			return result;
 		}
 
-		//NOTE this manipulates maxNode
-		Genome mutateAddNode(const Genome& genome, TNode& maxNode)
+		Network mutateAddNode(Population& population, const Network& network)
 		{
-			//TODO add the node into the gene node order
-			Genome result(genome);
+			Network result(network);
 
-			auto it = std::next(result.genes.begin(), getRandomInt(result.genes.size()));
+			Edge e = getRandomEdge(result);
+			ConnectionData& d = result.connections[e.second][e.first];
+			NodeID newNode = population.getNodeInnovation(d.innovation);
 
-			it->second.enabled = false;
+			d.enabled = false;
 
-			result.genes[std::pair<TNode, TNode>(it->first.first, maxNode)] = { 1.0f, true };
-			result.genes[std::pair<TNode, TNode>(maxNode, it->first.second)] = { it->second.weight, true };
-
-			++maxNode;
+			result.connections[newNode][e.first] = { population.getConnectionInnovation(newNode, e.first), 1.0f, true};
+			result.connections[e.second][newNode] = { population.getConnectionInnovation(e.second, newNode), d.weight, true };
+			result.nodes.insert(std::ranges::find(result.nodes, e.second), newNode);
 
 			return result;
 		}
 
-		Genome crossover(const Genome& first, const Genome& second)
+		Network crossover(const Network& first, const Network& second)
 		{
-			Genome result;
+			//TODO innovation
+			Network result;
 
-			const Genome& fitter = first.fitness > second.fitness ? first : second;
-			const Genome& lessFit = first.fitness < second.fitness ? first : second;
+			const Network& fitter = first.fitness > second.fitness ? first : second;
+			const Network& lessFit = first.fitness < second.fitness ? first : second;
 
-			for (const auto& g : fitter.genes)
-				if (lessFit.genes.contains(g.first))
-					result.genes[g.first] = getRandomInt(2) ? g.second : lessFit.genes.at(g.first);
-				else
-					result.genes[g.first] = g.second;
+			result.nodes = fitter.nodes;
+			result.connections = fitter.connections;
+
+			for (const auto& p1 : fitter.connections)
+				for (const auto& p2 : p1.second)
+					if (lessFit.containsEdgeWithInnovation(p2.first, p1.first, fitter.connections.at(p1.first).at(p2.first).innovation) && getRandomInt(2))
+						result.connections[p1.first][p2.first] = lessFit.connections[p1.first][p2.first];
 
 			return result;
 		}
 
 
-
-		//TODO maybe swap cycle and Neat-based compatibility check and just make this the loop body of the species insertion,
-		//	   then I don't have to deal with inserting the nodes into the species node vector again, since i already do it in the neat compatibility check
-		bool isCompatible(const Genome& genome, const Species& species)
-		{
-			//checking for cycles
-			//TODO check if this even works xP
-			std::vector<TNode> nodes(species.hiddenNodes);
-			std::vector<Connection<TNode>> connections(species.connections);
-
-			for (const auto& c : std::views::keys(genome.genes))
-			{
-				auto f = std::find(nodes.rbegin(), nodes.rend(), c.first);
-				auto s = std::find(nodes.rbegin(), nodes.rend(), c.second);
-
-				if (f < s)
-				{
-					for (auto it = f + 1; it != s; ++it)
-						if (connections.contains(std::pair(*it, *s)))
-							return false;
-
-					std::rotate(f, f + 1, nodes.rend());
-				}
-
-				connections.push_back(c);
-			}
-
-			//compatibility check according to NEAT paper
-			std::uint32_t ED =
-				std::accumulate(
-					genome.genes.begin(),
-					genome.genes.end(),
-					0,
-					[&species](auto acc, const auto& entry)
-					{
-						return acc + species.genomes[0].genes.contains(entry.first);
-					}
-				)
-				+ std::accumulate(
-					species.genomes[0].genes.begin(),
-					species.genomes[0].genes.end(),
-					0,
-					[&genome](auto acc, const auto& entry)
-					{
-						return acc + genome.genes.contains(entry.first);
-					}
-				);
-
-			std::uint32_t N = std::max(genome.genes.size(), species.genomes[0].genes.size());
-
-			float W = std::accumulate(
-				genome.genes.begin(),
-				genome.genes.end(),
-				0.0f,
-				[&species](auto acc, const auto& entry)
-				{
-					return
-						species.genomes[0].genes.contains(entry.first)
-						? acc + std::abs(species.genomes[0].genes[entry.first].weight - entry.second.weight)
-						: acc;
-				}
-			);
-
-			return c12 * ED / N + c3 * W <= deltaT;
-		}
 
 		std::array<float, ToutCount> generateNetworkOutput(
 			const NetworkConfiguration& network,
@@ -383,13 +430,13 @@ namespace Neat
 		{
 			std::array<float, ToutCount> finalOutput;
 			std::vector<float> output(ToutCount + TinCount + 1 + network.speciesHiddenNodes.size(), 0);
-			std::vector<TNode> nodes(network.speciesHiddenNodes);
+			std::vector<NodeID> nodes(network.speciesHiddenNodes);
 
 			std::ranges::copy(input, output.begin() + ToutCount);
 			output[ToutCount + TinCount] = 1;
 
 			//TODO don't need this
-			auto io = std::views::iota(static_cast<TNode>(1), static_cast<TNode>(TinCount));
+			auto io = std::views::iota(static_cast<NodeID>(1), static_cast<NodeID>(TinCount));
 			nodes.insert(nodes.end(), io.begin(), io.end());
 
 			//TODO split the loop in 2 so i don't have to copy the vector afterwards
@@ -397,7 +444,7 @@ namespace Neat
 				if (network.populationConnections.contains(out))
 					for (const auto& in : network.populationConnections.at(out))
 					{
-						std::pair<TNode, TNode> c(out, in);
+						std::pair<NodeID, NodeID> c(out, in);
 
 						if (network.genomeGenes.contains(c))
 							if (const auto& s = network.genomeGenes.at(c); s.enabled)
@@ -407,6 +454,13 @@ namespace Neat
 			std::copy(output.begin(), output.begin() + ToutCount, finalOutput.begin());
 
 			return finalOutput;
+		}
+
+		Edge getRandomEdge(Network& network)
+		{
+			auto flattened = network.getEdges();
+
+			return *std::ranges::next(flattened.begin(), getRandomInt(std::ranges::distance(flattened)));
 		}
 	};
 }

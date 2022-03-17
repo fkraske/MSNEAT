@@ -13,11 +13,13 @@ std::array<float, 900> MSSolve::EasyMSSimulation::getNetworkInput()
     return std::array<float, 900>();
 }
 
-float MSSolve::EasyMSSimulation::evaluateFitness(const NetworkConfiguration& network)
+float MSSolve::EasyMSSimulation::evaluateFitness(const Network& network)
 {
-    auto out = generateNetworkOutput(network, getNetworkInput());
+    return 0.0f;
 
-    return std::accumulate(out.begin(), out.end(), 0.0f, [](auto a, auto b) { return a + b; });
+    //auto out = generateNetworkOutput(network, getNetworkInput());
+
+    //return std::accumulate(out.begin(), out.end(), 0.0f, [](auto a, auto b) { return a + b; });
 }
 
 bool MSSolve::EasyMSSimulation::shouldFinishTraining(const Snapshot& snapshot)
@@ -25,7 +27,7 @@ bool MSSolve::EasyMSSimulation::shouldFinishTraining(const Snapshot& snapshot)
     return snapshot.generation > 10000;
 }
 
-MSSolve::EasyMSSimulation::EasyMSSimulation() : Neat::Simulation<900, 100, std::uint32_t>(
+MSSolve::EasyMSSimulation::EasyMSSimulation() : Neat::Simulation<std::uint32_t, 900, 100>(
     300,
     std::random_device()(),
     1.0f,

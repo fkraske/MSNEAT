@@ -87,7 +87,7 @@ std::ostream& operator<<(std::ostream& os, const MS::Board<Twidth, Theight, Tmin
                 os << "X";
                 break;
             case MS::CellSurface::Hidden:
-                os << "□";
+                os << "-";
                 break;
             default:
                 os << static_cast<std::uint32_t>(std::log2(static_cast<std::uint16_t>(s)));
