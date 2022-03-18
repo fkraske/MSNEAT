@@ -2,18 +2,13 @@
 
 #include <numeric>
 
-float MSSolve::EasyMSSimulation::activation(float f)
+float MSSolve::EasyMSSimulation::activation(float x)
 {
     //TODO unimplemented
     return 0.0f;
 }
 
-std::array<float, 900> MSSolve::EasyMSSimulation::getNetworkInput()
-{
-    return std::array<float, 900>();
-}
-
-float MSSolve::EasyMSSimulation::evaluateFitness(const Network& network)
+float MSSolve::EasyMSSimulation::evaluateFitness(const Network& network, NodeID maxNodeID)
 {
     return 0.0f;
 
@@ -36,8 +31,10 @@ MSSolve::EasyMSSimulation::EasyMSSimulation() : Neat::Simulation<std::uint32_t, 
     20,
     2,
     15,
+    0.2f,
     5,
     0.5f,
+    0.2f,
     0.8f,
     0.9f,
     0.1f,
