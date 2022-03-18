@@ -26,7 +26,7 @@ namespace Neat
     class Simulation
     {
         // Types
-    protected:
+    public:
         using NodeID = TInnovation;
         using ConnectionID = TInnovation;
         using Edge = std::pair<NodeID, NodeID>;
@@ -54,9 +54,9 @@ namespace Neat
         {
             std::vector<Network> networks;
 
-            Fitness combinedAdjustedFitness = 0;
-            Fitness combinedFitnessSpread = 0;
-            Fitness maxFitnessSpread = 0;
+            Fitness combinedAdjustedFitness = minimumFitness;
+            float combinedNetworkWeight = 0;
+            float weight = 0;
             Fitness highestFitness = minimumFitness;
             Fitness previousHighestFitness = minimumFitness;
             Fitness lowestFitness = maximumFitness;
@@ -79,8 +79,12 @@ namespace Neat
             {
                 std::stringstream ss;
 
+                ss << std::string(indent, '\t') << "{\n";
+
                 for (Network& n : networks)
-                    ss << std::string(indent, '\t') << "{\n" << n.basicInfo(true) << std::string(indent, '\t') << "},\n";
+                    ss << n.detailedInfo(indent + 1);
+
+                ss << std::string(indent, '\t') << "}";
 
                 return ss.str();
             }
@@ -95,10 +99,10 @@ namespace Neat
             std::unordered_map<ConnectionID, NodeID> nodeInnovations;
             std::unordered_map<Edge, ConnectionID> edgeInnovations;
 
-            Fitness combinedFitnessSpread = 0;
-            Fitness maxFitnessSpread = 0;
+            float combinedSpeciesWeight = 0;
             Fitness highestFitness = minimumFitness;
             Fitness previousHighestFitness = minimumFitness;
+            Fitness highestSpeciesAdjustedFitness = minimumFitness;
             Fitness lowestSpeciesAdjustedFitness = maximumFitness;
 
             std::uint16_t staleGenerations = 0;
@@ -164,7 +168,7 @@ namespace Neat
                 std::stringstream ss;
 
                 for (Species& s : species)
-                    ss << "{\n" << s.networkInfo(1) << "},\n";
+                    ss << s.networkInfo(1) << ",\n";
 
                 return ss.str();
             }
@@ -176,6 +180,7 @@ namespace Neat
             ConnectionMap connections;
             Fitness fitness = minimumFitness;
             Fitness adjustedFitness = minimumFitness;
+            float weight = 0;
 
             inline ConnectionData& getConnectionData(NodeID in, NodeID out)
             {
@@ -283,12 +288,51 @@ namespace Neat
                 return finalOutput;
             }
 
-            std::string basicInfo(int indent = 0)
+            std::string nodeInfo(int indent = 0)
             {
                 std::stringstream ss;
 
+                ss << std::string(indent, '\t') << "{ ";
+
+                for (NodeID n : nodes)
+                    ss << n << ", ";
+
+                ss << "}";
+
+                return ss.str();
+            }
+
+            std::string connectionInfo(int indent = 0)
+            {
+                std::stringstream ss;
+
+                ss << std::string(indent, '\t') << "{\n";
+
                 for (Edge e : getEdges())
-                    ss << std::string(indent, '\t') << "{ " << e.first << ", " << e.second << " }, \n";
+                {
+                    const ConnectionData& data = getConnectionData(e);
+
+                    ss << std::string(indent + 1, '\t') << "{ "
+                        << e.first << ", "
+                        << e.second << ": "
+                        << data.innovation << ", "
+                        << data.weight << ", "
+                        << data.enabled << " }, \n";
+                }
+
+                ss << std::string(indent, '\t') << "}";
+
+                return ss.str();
+            }
+
+            std::string detailedInfo(int indent = 0)
+            {
+                std::stringstream ss;
+
+                ss << std::string(indent, '\t') << "{\n";
+                ss << std::string(indent + 1, '\t') << "Nodes:\n" << nodeInfo(indent + 1) << ",\n\n";
+                ss << std::string(indent + 1, '\t') << "Edges:\n" << connectionInfo(indent + 1) << ",\n";
+                ss << std::string(indent, '\t') << "},\n";
 
                 return ss.str();
             }
@@ -432,10 +476,18 @@ namespace Neat
                     );
 
                     p.species.resize(std::clamp<size_t>(stalePopulationSurvivors, 1, p.species.size()));
+                    //TODO fix offspring count in this case
                 }
                 else {
                     // Remove stale Species
-                    std::ranges::remove_if(p.species, [this](const Species& s) { return s.staleGenerations >= staleSpeciesLimit; });
+                    p.species.resize(
+                        std::remove_if(
+                            p.species.begin(),
+                            p.species.end(),
+                            [this](const Species& s) { return s.staleGenerations >= staleSpeciesLimit; }
+                        ) - p.species.begin()
+                    );
+                    //TODO fix offspring count in this case
 
                     if (p.species.empty())
                         p.species.push_back(Species{ std::vector<Network>(populationSize) });
@@ -448,13 +500,11 @@ namespace Neat
                     s.remainingOffspring = std::max(
                         1u,
                         randomRound<std::uint32_t>(
-                            p.combinedFitnessSpread
-                                ? populationSize /** rescale(s.combinedAdjustedFitness - p.lowestFitness, )*/
+                            p.combinedSpeciesWeight
+                                ? populationSize * s.weight / p.combinedSpeciesWeight
                                 : static_cast<float>(populationSize) / p.species.size()
-                        )
+                            )
                     );
-
-                    std::cout << s.remainingOffspring << "\n";
                 }
 
                 // Cull each Species' weakest individuals
@@ -485,8 +535,8 @@ namespace Neat
 
                         for (auto it1 = p.species.begin(); it1 != p.species.end(); ++it1)
                         {
-                            float rP1 = p.combinedFitnessSpread
-                                ? (it1->combinedAdjustedFitness - p.lowestSpeciesAdjustedFitness) / p.combinedFitnessSpread
+                            float rP1 = p.combinedSpeciesWeight
+                                ? it1->weight / p.combinedSpeciesWeight
                                 : 1 / p.species.size();
 
                             if (l1 < rP1)
@@ -495,8 +545,8 @@ namespace Neat
 
                                 for (auto it2 = p.species.begin(); it2 != p.species.end(); ++it2 != it1 ? it2 : ++it2)
                                 {
-                                    float rP2 = p.combinedFitnessSpread
-                                        ? (it2->combinedAdjustedFitness - p.lowestSpeciesAdjustedFitness) / p.combinedFitnessSpread
+                                    float rP2 = p.combinedSpeciesWeight
+                                        ? it2->weight / p.combinedSpeciesWeight
                                         : 1 / p.species.size();
 
                                     if (l2 < rP2)
@@ -518,7 +568,7 @@ namespace Neat
 
                     },
                     interspeciesMatingChance
-                        );
+                );
 
                 // Remaining Offspring Generation
                 for (Species& s : p.species)
@@ -557,6 +607,7 @@ namespace Neat
                         it->networks.erase(it->networks.begin());
                         ++it;
                     }
+
                 }
 
                 p = std::move(pN);
@@ -581,23 +632,30 @@ namespace Neat
                     }
 
                     p.lowestSpeciesAdjustedFitness = std::min(p.lowestSpeciesAdjustedFitness, s.combinedAdjustedFitness);
+                    p.highestSpeciesAdjustedFitness = std::max(p.highestSpeciesAdjustedFitness, s.combinedAdjustedFitness);
                     s.staleGenerations = s.highestFitness > s.previousHighestFitness ? 0 : s.staleGenerations + 1;
                 }
 
                 for (auto& s : p.species)
                 {
-                    for (auto& n : s.networks)
-                    {
-                        Fitness fitnessSpread = n.fitness - s.lowestFitness;
+                    if (s.highestFitness - s.lowestFitness)
+                        for (auto& n : s.networks)
+                            s.combinedNetworkWeight += n.weight = rescale(
+                                n.fitness - s.lowestFitness,
+                                s.lowestFitness,
+                                s.highestFitness,
+                                networkSelectionBaseline * (s.highestFitness - s.lowestFitness),
+                                s.highestFitness - s.lowestFitness
+                            );
 
-                        s.combinedFitnessSpread += fitnessSpread;
-                        s.maxFitnessSpread = std::max(s.maxFitnessSpread, fitnessSpread);
-                    }
-
-                    Fitness fitnessSpread = s.combinedAdjustedFitness - p.lowestFitness;
-
-                    p.combinedFitnessSpread += fitnessSpread;
-                    p.maxFitnessSpread = std::max(p.maxFitnessSpread, fitnessSpread);
+                    if (p.highestSpeciesAdjustedFitness - p.lowestSpeciesAdjustedFitness)
+                        p.combinedSpeciesWeight += s.weight = rescale(
+                            s.combinedAdjustedFitness - p.lowestSpeciesAdjustedFitness,
+                            p.lowestSpeciesAdjustedFitness,
+                            p.highestSpeciesAdjustedFitness,
+                            speciesOffspringBaseline * (p.highestSpeciesAdjustedFitness - p.lowestSpeciesAdjustedFitness),
+                            p.highestSpeciesAdjustedFitness - p.lowestSpeciesAdjustedFitness
+                        );
                 }
 
                 p.staleGenerations = p.highestFitness > p.previousHighestFitness ? 0 : p.staleGenerations + 1;
@@ -651,21 +709,33 @@ namespace Neat
             size_t nodesSize = result.nodes.size();
 
             size_t inNode = getRandomInt(nodesSize + inputSize + 1);
-            size_t outNode = getRandomInt(nodesSize + outputSize - (inNode < nodesSize)) + (inNode < nodesSize&& inNode <= outNode);
+            size_t outNode = getRandomInt(nodesSize + outputSize - (inNode < nodesSize));
 
-            inNode = inNode < nodesSize ? result.nodes[inNode] : inNode - nodesSize + outputSize;
-            outNode = outNode < nodesSize ? result.nodes[outNode] : outNode - nodesSize;
+
+            outNode += inNode < nodesSize && inNode <= outNode;
 
             if (!result.containsEdge(inNode, outNode))
             {
-                auto inIt = std::find(result.nodes.rbegin(), result.nodes.rend(), inNode);
-                auto outIt = std::find(result.nodes.rbegin(), result.nodes.rend(), outNode);
+                if (inNode >= nodesSize || outNode >= nodesSize)
+                {
+                    inNode = inNode < nodesSize ? result.nodes[inNode] : inNode + outputSize - nodesSize;
+                    outNode = outNode < nodesSize ? result.nodes[outNode] : outNode - nodesSize;
+                }
+                else
+                {
+                    auto inIt = result.nodes.rbegin() + result.nodes.size() - 1 - inNode;
+                    auto outIt = result.nodes.rbegin() + result.nodes.size() - 1 - outNode;
 
-                if (inIt < outIt)
-                    if (network.containsIndirectReverseConnection(inIt, outIt))
-                        std::rotate(inIt, inIt + 1, outIt + 1);
-                    else
-                        return result;
+                    if (inIt < outIt)
+                        if (network.containsIndirectReverseConnection(inIt, outIt))
+                            std::rotate(inIt, inIt + 1, outIt + 1);
+                        else
+                            return result;
+
+                    inNode = result.nodes[inNode];
+                    outNode = result.nodes[outNode];
+                }
+
 
                 result.getConnectionData(inNode, outNode) = {
                     population.getConnectionInnovation(inNode, outNode),
@@ -706,7 +776,7 @@ namespace Neat
             Network result;
 
             const Network& fitter = first.fitness > second.fitness ? first : second;
-            const Network& lessFit = first.fitness < second.fitness ? first : second;
+            const Network& lessFit = first.fitness <= second.fitness ? first : second;
 
             result.nodes = fitter.nodes;
             result.connections = fitter.connections;
@@ -753,6 +823,9 @@ namespace Neat
         template <std::floating_point T>
         inline T rescale(T v, T oldMin, T oldMax, T newMin, T newMax)
         {
+            if (oldMax == oldMin)
+                return v;
+
             return (v - oldMin) * (newMax - newMin) / (oldMax - oldMin) + newMin;
         }
 
@@ -785,6 +858,13 @@ namespace Neat
 
             auto ED = flattenedSize + otherFlattenedSize - 2 * matchingSize;
             auto N = std::max(flattenedSize, otherFlattenedSize);
+
+            if (!matchingSize)
+                return !N;
+
+            if (!N)
+                return true;
+
             float W = 0.0f;
 
             for (Edge e : matching)
@@ -801,8 +881,8 @@ namespace Neat
 
             for (auto it = species.networks.begin(); it != species.networks.end(); ++it)
             {
-                float relativePerformance = species.combinedFitnessSpread
-                    ? (species.maxFitnessSpread * networkSelectionBaseline + (it->fitness - species.lowestFitness) * (1 - networkSelectionBaseline)) / species.combinedFitnessSpread
+                float relativePerformance = species.combinedNetworkWeight
+                    ? it->weight / species.combinedNetworkWeight
                     : 1.0f / species.networks.size();
 
                 if (r < relativePerformance)
@@ -820,8 +900,8 @@ namespace Neat
 
             for (auto it = species.networks.begin(); it != species.networks.end(); ++it != ignore ? it : ++it)
             {
-                float relativePerformance = species.combinedFitnessSpread
-                    ? (species.maxFitnessSpread * networkSelectionBaseline + (it->fitness - species.lowestFitness) * (1 - networkSelectionBaseline)) / species.combinedFitnessSpread
+                float relativePerformance = species.combinedNetworkWeight
+                    ? it->weight / species.combinedNetworkWeight
                     : 1.0f / species.networks.size();
 
                 if (r < relativePerformance)
