@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <functional>
@@ -94,7 +95,7 @@ namespace Neat
         {
             std::vector<Species> species;
 
-            NodeID maxNodeID = 0;
+            NodeID maxNodeID = outputSize + inputSize + 1;
             ConnectionID maxConnectionID = 0;
             std::unordered_map<ConnectionID, NodeID> nodeInnovations;
             std::unordered_map<Edge, ConnectionID> edgeInnovations;
@@ -122,9 +123,22 @@ namespace Neat
                 return getConnectionInnovation(Edge(in, out));
             }
 
+            //TODO what does this do?
             auto getNetworks()
             {
                 return species | std::views::transform([](const auto& s) { return s.networks; }) | std::views::join;
+            }
+
+            Network& getFittest()
+            {
+                Network* result = &species.front().networks.front();
+
+                for (Species& s : species)
+                    for (Network& n : s.networks)
+                        if (n.fitness > result->fitness)
+                            result = &n;
+
+                return *result;
             }
 
             void addNewSpecies(const Network& base)
@@ -146,7 +160,7 @@ namespace Neat
             {
                 std::stringstream ss;
 
-                ss << "Population Size: " << std::ranges::distance(getNetworks()) << "\n"
+                ss  << "Population Size: " << std::ranges::distance(getNetworks()) << "\n"
                     << "Number of Species: " << species.size() << "\n"
                     << "Highest Fitness : " << highestFitness << "\n";
 
@@ -266,28 +280,6 @@ namespace Neat
                     | std::views::join;
             }
 
-            inline std::array<float, outputSize> generateOutput(const std::array<float, inputSize>& input, NodeID maxNodeID) const
-            {
-                std::array<float, outputSize> finalOutput{ };
-                std::vector<float> output(maxNodeID, 0);
-
-                std::ranges::copy(input, output.begin() + outputSize);
-                output[outputSize + inputSize] = 1;
-
-                for (NodeID out : nodes)
-                    for (const auto& [in, data] : connections.at(out))
-                        if (data.enabled)
-                            output[out] += output[in] * data.weight;
-
-                for (NodeID out = 0; out < outputSize; ++out)
-                    if (connections.contains(out))
-                        for (const auto& [in, data] : connections.at(out))
-                            if (data.enabled)
-                                finalOutput[out] += output[in] * data.weight;
-
-                return finalOutput;
-            }
-
             std::string nodeInfo(int indent = 0)
             {
                 std::stringstream ss;
@@ -308,7 +300,7 @@ namespace Neat
 
                 ss << std::string(indent, '\t') << "{\n";
 
-                for (Edge e : getEdges())
+                for (auto e : getEdges())
                 {
                     const ConnectionData& data = getConnectionData(e);
 
@@ -330,7 +322,8 @@ namespace Neat
                 std::stringstream ss;
 
                 ss << std::string(indent, '\t') << "{\n";
-                ss << std::string(indent + 1, '\t') << "Nodes:\n" << nodeInfo(indent + 1) << ",\n\n";
+                ss << std::string(indent + 1, '\t') << "Fitness: " << fitness << ",\n";
+                ss << std::string(indent + 1, '\t') << "Nodes:\n" << nodeInfo(indent + 1) << ",\n";
                 ss << std::string(indent + 1, '\t') << "Edges:\n" << connectionInfo(indent + 1) << ",\n";
                 ss << std::string(indent, '\t') << "},\n";
 
@@ -353,7 +346,7 @@ namespace Neat
 
 
         // Fields
-    private:
+    protected:
         std::uint32_t populationSize;
         std::mt19937_64 rng;
         std::uniform_real_distribution<float> realDistribution;
@@ -442,18 +435,17 @@ namespace Neat
             assert(addConnectionChance > 0.0f);
         }
 
-        virtual float activation(float x) = 0;
+        virtual float activation(float x) const = 0;
         virtual Fitness evaluateFitness(const Network& network, NodeID maxNodeID) = 0;
-        virtual bool shouldFinishTraining(const Snapshot& snapshot) = 0;
+        virtual bool shouldFinishTraining(Snapshot snapshot) = 0;
+        virtual Population initializePopulation() = 0;
 
     public:
         TrainingResult train()
         {
             GenerationCount generation = 0;
 
-            Population p;
-            p.species.push_back(Species{ std::vector<Network>(populationSize) });
-            p.maxNodeID = outputSize + inputSize + 1;
+            Population p = initializePopulation();
 
             do
             {
@@ -476,9 +468,11 @@ namespace Neat
                     );
 
                     p.species.resize(std::clamp<size_t>(stalePopulationSurvivors, 1, p.species.size()));
+
                     //TODO fix offspring count in this case
                 }
-                else {
+                else
+                {
                     // Remove stale Species
                     p.species.resize(
                         std::remove_if(
@@ -490,13 +484,12 @@ namespace Neat
                     //TODO fix offspring count in this case
 
                     if (p.species.empty())
-                        p.species.push_back(Species{ std::vector<Network>(populationSize) });
+                        p = initializePopulation();
                 }
 
                 //TODO make new using def for population values
 
                 for (Species& s : p.species)
-                {
                     s.remainingOffspring = std::max(
                         1u,
                         randomRound<std::uint32_t>(
@@ -505,8 +498,8 @@ namespace Neat
                                 : static_cast<float>(populationSize) / p.species.size()
                             )
                     );
-                }
 
+                //TODO try out culling population-wide instead of per species
                 // Cull each Species' weakest individuals
                 if (cullFactor > 0)
                 {
@@ -528,12 +521,14 @@ namespace Neat
                         insertNetwork(pN, s, s.networks.front());
 
                 // Interspecies mating
-                repeatRandomly(
+                repeatWithRandomMantissa(
                     [this, &p, &pN]()
                     {
                         float l1 = getRandomFloat();
 
-                        for (auto it1 = p.species.begin(); it1 != p.species.end(); ++it1)
+                        auto itB = p.species.begin();
+
+                        for (auto it1 = itB; it1 != p.species.end(); ++it1)
                         {
                             float rP1 = p.combinedSpeciesWeight
                                 ? it1->weight / p.combinedSpeciesWeight
@@ -543,7 +538,7 @@ namespace Neat
                             {
                                 float l2 = getRandomFloat() - rP1;
 
-                                for (auto it2 = p.species.begin(); it2 != p.species.end(); ++it2 != it1 ? it2 : ++it2)
+                                for (auto it2 = it1 == itB ? itB + 1 : itB ; it2 != p.species.end(); ++it2 != it1 ? it2 : ++it2)
                                 {
                                     float rP2 = p.combinedSpeciesWeight
                                         ? it2->weight / p.combinedSpeciesWeight
@@ -572,28 +567,20 @@ namespace Neat
 
                 // Remaining Offspring Generation
                 for (Species& s : p.species)
-                {
                     while (s.remainingOffspring > 0)
                     {
-                        if (s.networks.size() > 1 && getRandomFloat() < crossoverChance)
-                        {
-                            auto it = getRandomPerformanceWeightedParent(s);
+                        auto it = getRandomPerformanceWeightedParent(s);
+                        Network n = (s.networks.size() > 1 && getRandomFloat() < crossoverChance)
+                            ? crossover(*it, *getRandomPerformanceWeightedParent(s, it))
+                            : *it;
 
-                            insertNetwork(pN, s, crossover(*it, *getRandomPerformanceWeightedParent(s, it)));
-                        }
-                        else
-                        {
-                            Network n(*getRandomPerformanceWeightedParent(s));
+                        repeatWithRandomMantissa([this, &pN, &n]() { n = mutateAddConnection(pN, n); }, addConnectionChance);
+                        repeatWithRandomMantissa([this, &pN, &n]() { n = mutateAddNode(pN, n); }, addNodeChance);
+                        repeatWithRandomMantissa([this, &n]() { n = mutateWeight(n); }, weightMutateChance);
+                        repeatWithRandomMantissa([this, &n]() { n = mutateEnableConnection(n); }, connectionEnableChance);
 
-                            repeatRandomly([this, &n]() { n = mutateWeight(n); }, weightMutateChance);
-                            repeatRandomly([this, &n]() { n = mutateEnableConnection(n); }, connectionEnableChance);
-                            repeatRandomly([this, &pN, &n]() { n = mutateAddConnection(pN, n); }, addConnectionChance);
-                            repeatRandomly([this, &pN, &n]() { n = mutateAddNode(pN, n); }, addNodeChance);
-
-                            insertNetwork(pN, s, n);
-                        }
+                        insertNetwork(pN, s, n);
                     }
-                }
 
                 // Remove Species representatives
                 for (auto it = pN.species.begin(); it != pN.species.end();)
@@ -616,9 +603,9 @@ namespace Neat
 
                 // FITNESS EVALUATION
 
-                for (auto& s : p.species)
+                for (Species& s : p.species)
                 {
-                    for (auto& n : s.networks)
+                    for (Network& n : s.networks)
                     {
                         p.highestFitness = std::max(
                             p.highestFitness,
@@ -636,12 +623,12 @@ namespace Neat
                     s.staleGenerations = s.highestFitness > s.previousHighestFitness ? 0 : s.staleGenerations + 1;
                 }
 
-                for (auto& s : p.species)
+                for (Species& s : p.species)
                 {
                     if (s.highestFitness - s.lowestFitness)
-                        for (auto& n : s.networks)
+                        for (Network& n : s.networks)
                             s.combinedNetworkWeight += n.weight = rescale(
-                                n.fitness - s.lowestFitness,
+                                n.fitness,
                                 s.lowestFitness,
                                 s.highestFitness,
                                 networkSelectionBaseline * (s.highestFitness - s.lowestFitness),
@@ -650,7 +637,7 @@ namespace Neat
 
                     if (p.highestSpeciesAdjustedFitness - p.lowestSpeciesAdjustedFitness)
                         p.combinedSpeciesWeight += s.weight = rescale(
-                            s.combinedAdjustedFitness - p.lowestSpeciesAdjustedFitness,
+                            s.combinedAdjustedFitness,
                             p.lowestSpeciesAdjustedFitness,
                             p.highestSpeciesAdjustedFitness,
                             speciesOffspringBaseline * (p.highestSpeciesAdjustedFitness - p.lowestSpeciesAdjustedFitness),
@@ -702,6 +689,8 @@ namespace Neat
             return result;
         }
 
+        //TODO don't give up after one try (maybe std::shuffle, to iterate over all possible node pairs?)
+        //TODO find out why theres only 1 node, 5 edges and not 1 node, 6/7/8 edges
         Network mutateAddConnection(Population& population, const Network& network)
         {
             Network result(network);
@@ -710,7 +699,6 @@ namespace Neat
 
             size_t inNode = getRandomInt(nodesSize + inputSize + 1);
             size_t outNode = getRandomInt(nodesSize + outputSize - (inNode < nodesSize));
-
 
             outNode += inNode < nodesSize && inNode <= outNode;
 
@@ -747,6 +735,7 @@ namespace Neat
             return result;
         }
 
+        //TODO same node can be added multiple times in the same generation and same individual
         Network mutateAddNode(Population& population, const Network& network)
         {
             Network result(network);
@@ -831,6 +820,54 @@ namespace Neat
 
 
 
+        inline std::array<float, outputSize> generateOutput(const Network& network, const std::array<float, inputSize>& input, NodeID maxNodeID) const
+        {
+            std::array<float, outputSize> finalOutput{ };
+            std::vector<float> output(maxNodeID, 0);
+
+            std::ranges::copy(input, output.begin() + outputSize);
+            for (int i = outputSize; i < outputSize + inputSize; ++i)
+                output[i] = activation(output[i]);
+
+            output[outputSize + inputSize] = 1;
+
+            for (NodeID hidden : network.nodes)
+            {
+                //TODO use std::ranges::any instead
+                bool applyActivation = false;
+
+                for (const auto& [in, data] : network.connections.at(hidden))
+                    if (data.enabled)
+                    {
+                        output[hidden] += output[in] * data.weight;
+                        applyActivation = true;
+                    }
+
+                if (applyActivation)
+                    output[hidden] = activation(output[hidden]);
+            }
+
+            for (NodeID out = 0; out < outputSize; ++out)
+            {
+                //TODO use std::ranges::any instead
+                bool applyActivation = false;
+
+                if (network.connections.contains(out))
+                    for (const auto& [in, data] : network.connections.at(out))
+                        if (data.enabled)
+                        {
+                            finalOutput[out] += output[in] * data.weight;
+                            applyActivation = true;
+                        }
+
+                if (applyActivation)
+                    finalOutput[out] = activation(finalOutput[out]);
+            }
+
+            return finalOutput;
+        }
+        //TODO make member functions const
+
         //TODO can't i fit this in the respective classes?
         void insertNetwork(Population& population, Species& originSpecies, const Network& network)
         {
@@ -859,11 +896,11 @@ namespace Neat
             auto ED = flattenedSize + otherFlattenedSize - 2 * matchingSize;
             auto N = std::max(flattenedSize, otherFlattenedSize);
 
-            if (!matchingSize)
-                return !N;
-
             if (!N)
                 return true;
+
+            if (!matchingSize)
+                return false;
 
             float W = 0.0f;
 
@@ -881,14 +918,14 @@ namespace Neat
 
             for (auto it = species.networks.begin(); it != species.networks.end(); ++it)
             {
-                float relativePerformance = species.combinedNetworkWeight
+                float weight = species.combinedNetworkWeight
                     ? it->weight / species.combinedNetworkWeight
                     : 1.0f / species.networks.size();
 
-                if (r < relativePerformance)
+                if (r < weight)
                     return it;
                 else
-                    r -= relativePerformance;
+                    r -= weight;
             }
 
             return species.networks.end() - 1;
@@ -896,21 +933,32 @@ namespace Neat
 
         inline auto getRandomPerformanceWeightedParent(const Species& species, std::vector<Network>::const_iterator ignore)
         {
-            float r = getRandomFloat() - ignore->adjustedFitness;
+            float r = getRandomFloat() - (species.combinedNetworkWeight ? (ignore->weight / species.combinedNetworkWeight) : 1.0f / species.networks.size());
 
-            for (auto it = species.networks.begin(); it != species.networks.end(); ++it != ignore ? it : ++it)
+            auto itB = species.networks.begin();
+
+            for (auto it = itB == ignore ? itB + 1 : itB; it != species.networks.end(); ++it != ignore ? it : ++it)
             {
-                float relativePerformance = species.combinedNetworkWeight
+                float weight = species.combinedNetworkWeight
                     ? it->weight / species.combinedNetworkWeight
                     : 1.0f / species.networks.size();
 
-                if (r < relativePerformance)
+                if (r < weight)
                     return it;
                 else
-                    r -= relativePerformance;
+                    r -= weight;
             }
 
             return species.networks.end() - 1;
+        }
+
+        inline void repeatWithRandomMantissa(std::function<void()> f, float times)
+        {
+            for (; times > 1; --times)
+                f();
+
+            if (getRandomFloat() < times)
+                f();
         }
 
         inline void repeatRandomly(std::function<void()> f, float maxTimes, float minTimes = 0)
