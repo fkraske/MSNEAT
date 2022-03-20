@@ -3,6 +3,7 @@
 #include <MS/Board.h>
 #include <MSNEAT/EasyMSSimulation.h>
 
+// XOR for testing purposes - sadly unsuccessful
 class XORSimulation : public Neat::Simulation<std::uint32_t, 2, 1>
 {
     virtual float activation(float x) const override

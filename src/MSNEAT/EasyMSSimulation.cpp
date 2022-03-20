@@ -11,21 +11,19 @@ float MSSolve::EasyMSSimulation::activation(float x) const
 
 float MSSolve::EasyMSSimulation::evaluateFitness(const Network& network, NodeID maxNodeID)
 {
+    //TODO unimplemented
     return 0.0f;
-
-    //auto out = generateNetworkOutput(network, getNetworkInput());
-
-    //return std::accumulate(out.begin(), out.end(), 0.0f, [](auto a, auto b) { return a + b; });
 }
 
 bool MSSolve::EasyMSSimulation::shouldFinishTraining(Snapshot snapshot)
 {
+    //TODO unimplemented
     return snapshot.generation > 10000;
 }
 
 MSSolve::EasyMSSimulation::Population MSSolve::EasyMSSimulation::initializePopulation()
 {
-    //TODO
+    //TODO unimplemented
     return {  };
 }
 

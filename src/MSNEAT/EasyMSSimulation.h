@@ -4,6 +4,7 @@
 
 namespace MSSolve
 {
+    // Non-functional skeleton implementation for training networks to solve Minesweeper
     class EasyMSSimulation : public Neat::Simulation<std::uint32_t, 900, 100>
     {
     private:
