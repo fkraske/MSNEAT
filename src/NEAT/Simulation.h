@@ -13,14 +13,8 @@
 #include <unordered_map>
 #include <vector>
 
-//TODO remove
-#include <iostream>
-
 #include "hashes.h"
 
-//TODO make performant :P
-//TODO test stuff
-//TODO maybe add fitness and generation count types as template parameters
 namespace Neat
 {
     template <std::unsigned_integral TInnovation, TInnovation TinCount, TInnovation ToutCount>
@@ -34,7 +28,6 @@ namespace Neat
         using GenerationCount = std::uint64_t;
         using Fitness = float;
 
-        //TODO
         static inline constexpr TInnovation inputSize = TinCount;
         static inline constexpr TInnovation outputSize = ToutCount;
         static inline constexpr Fitness minimumFitness = std::numeric_limits<Fitness>::lowest();
@@ -42,7 +35,7 @@ namespace Neat
 
         struct ConnectionData
         {
-            TInnovation innovation;
+            ConnectionID innovation;
             float weight;
             bool enabled;
         };
@@ -123,7 +116,6 @@ namespace Neat
                 return getConnectionInnovation(Edge(in, out));
             }
 
-            //TODO what does this do?
             auto getNetworks()
             {
                 return species | std::views::transform([](const auto& s) { return s.networks; }) | std::views::join;
@@ -350,29 +342,68 @@ namespace Neat
         std::uint32_t populationSize;
         std::mt19937_64 rng;
         std::uniform_real_distribution<float> realDistribution;
+
+        // Compatibility constants
         float c12;
         float c3;
         float deltaT;
+
+        // After [stalePopulationLimit] generations of no fitness improvements
+        // in the entire population only [stalePopulationSurvivors] species survive
         std::uint16_t stalePopulationLimit;
         std::uint32_t stalePopulationSurvivors;
+
+        // After [staleSpeciesLimit] generations of fitness improvements
+        // in a species, that species will not produce offspring
         std::uint16_t staleSpeciesLimit;
+
+        // Ratio of offspring of the least performant species in comparison to the most performant one
         float speciesOffspringBaseline;
+
+        // If a species has at least [championSurvivalLimit] members, its
+        // most performant member will survive unchanged
         std::uint32_t championSurvivalLimit;
+
+        // Ratio of individuals in each species, which will be discarded before evolution
         float cullFactor;
+
+        // Ratio of offspring of the least performant networks in comparison
+        // to the most performant one in each species
         float networkSelectionBaseline;
+
+        // Chance for a weight mutation to occur
         float weightMutateChance;
+
+        // When a weight is being mutated, the chance with which it will be
+        // changed slightly instead of reset to a random value
         float perturbChance;
+
+        // Maximum absolute value for weight change
         float perturbAmount;
+
+        // Maximum absolute value for new random weight
         float randomWeightSpread;
+
+        // Chance for a connection enable mutation to occur
         float connectionEnableChance;
+
+        // Chance for a crossover to occur
         float crossoverChance;
+
+        // Chance for interspecies mating to occur
         float interspeciesMatingChance;
+
+        // Chance for an add node mutation to occur
         float addNodeChance;
+
+        // Chance for an add connection mutation to occur
         float addConnectionChance;
+
+        // Maximum absolute value for new connections
         float initialWeightSpread;
 
-        // Constructors, Destructors, Methods
     protected:
+        // Constructors, Destructors, Methods
         Simulation(
             std::uint32_t populationSize,
             std::uint64_t seed,
@@ -486,8 +517,6 @@ namespace Neat
                     if (p.species.empty())
                         p = initializePopulation();
                 }
-
-                //TODO make new using def for population values
 
                 for (Species& s : p.species)
                     s.remainingOffspring = std::max(
@@ -648,7 +677,7 @@ namespace Neat
                 p.staleGenerations = p.highestFitness > p.previousHighestFitness ? 0 : p.staleGenerations + 1;
             } while (!shouldFinishTraining({ generation++, p }));
 
-            return { p }; //TODO
+            return { p };
         }
 
 
@@ -689,8 +718,6 @@ namespace Neat
             return result;
         }
 
-        //TODO don't give up after one try (maybe std::shuffle, to iterate over all possible node pairs?)
-        //TODO find out why theres only 1 node, 5 edges and not 1 node, 6/7/8 edges
         Network mutateAddConnection(Population& population, const Network& network)
         {
             Network result(network);
@@ -735,7 +762,6 @@ namespace Neat
             return result;
         }
 
-        //TODO same node can be added multiple times in the same generation and same individual
         Network mutateAddNode(Population& population, const Network& network)
         {
             Network result(network);
@@ -781,6 +807,8 @@ namespace Neat
 
 
 
+        // General util methods
+
         inline bool getRandomBool()
         {
             return getRandomInt(2);
@@ -818,7 +846,36 @@ namespace Neat
             return (v - oldMin) * (newMax - newMin) / (oldMax - oldMin) + newMin;
         }
 
+        inline void repeatWithRandomMantissa(std::function<void()> f, float times)
+        {
+            for (; times > 1; --times)
+                f();
 
+            if (getRandomFloat() < times)
+                f();
+        }
+
+        inline void repeatRandomly(std::function<void()> f, float maxTimes, float minTimes = 0)
+        {
+            float remainingTimes = minTimes + getRandomFloat() * (maxTimes - minTimes);
+
+            for (; remainingTimes > 1; --remainingTimes)
+                f();
+
+            if (getRandomFloat() < remainingTimes)
+                f();
+        }
+
+        inline Edge getRandomEdge(Network& network)
+        {
+            auto flattened = network.getEdges();
+
+            return *std::ranges::next(flattened.begin(), getRandomInt(std::ranges::distance(flattened)));
+        }
+
+
+
+        // Util methods for evolution
 
         inline std::array<float, outputSize> generateOutput(const Network& network, const std::array<float, inputSize>& input, NodeID maxNodeID) const
         {
@@ -833,7 +890,6 @@ namespace Neat
 
             for (NodeID hidden : network.nodes)
             {
-                //TODO use std::ranges::any instead
                 bool applyActivation = false;
 
                 for (const auto& [in, data] : network.connections.at(hidden))
@@ -849,7 +905,6 @@ namespace Neat
 
             for (NodeID out = 0; out < outputSize; ++out)
             {
-                //TODO use std::ranges::any instead
                 bool applyActivation = false;
 
                 if (network.connections.contains(out))
@@ -866,9 +921,7 @@ namespace Neat
 
             return finalOutput;
         }
-        //TODO make member functions const
 
-        //TODO can't i fit this in the respective classes?
         void insertNetwork(Population& population, Species& originSpecies, const Network& network)
         {
             --originSpecies.remainingOffspring;
@@ -950,33 +1003,6 @@ namespace Neat
             }
 
             return species.networks.end() - 1;
-        }
-
-        inline void repeatWithRandomMantissa(std::function<void()> f, float times)
-        {
-            for (; times > 1; --times)
-                f();
-
-            if (getRandomFloat() < times)
-                f();
-        }
-
-        inline void repeatRandomly(std::function<void()> f, float maxTimes, float minTimes = 0)
-        {
-            float remainingTimes = minTimes + getRandomFloat() * (maxTimes - minTimes);
-
-            for (; remainingTimes > 1; --remainingTimes)
-                f();
-
-            if (getRandomFloat() < remainingTimes)
-                f();
-        }
-
-        inline Edge getRandomEdge(Network& network)
-        {
-            auto flattened = network.getEdges();
-
-            return *std::ranges::next(flattened.begin(), getRandomInt(std::ranges::distance(flattened)));
         }
     };
 }
