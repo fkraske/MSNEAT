@@ -78,19 +78,11 @@ namespace NEAT
 
             for (NodeID out = 0; out < ToutCount; ++out)
             {
-                bool applyActivation = false;
-
                 if (connections.contains(out))
                     for (const auto& [in, data] : connections.at(out))
                         if (data.enabled)
-                        {
-                            finalOutput[out] += output[in] * data.weight;
-                            applyActivation = true;
+                            finalOutput[out] += output[in] * data.weight; // TODO separate activation function for output layer
                         }
-
-                if (applyActivation)
-                    finalOutput[out] = activation(finalOutput[out]);
-            }
 
             return finalOutput;
         }
