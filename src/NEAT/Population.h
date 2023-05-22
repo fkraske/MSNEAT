@@ -63,6 +63,7 @@ namespace NEAT
             float weightMutateChance,
             float connectionEnableChance,
             float crossoverChance,
+            float inheritDisabledChance,
             float perturbChance,
             float perturbAmount,
             float interspeciesMatingChance,
@@ -88,7 +89,7 @@ namespace NEAT
                     species,
                     [](const Species& first, const Species& second)
                     {
-                        return second.combinedAdjustedFitness < first.combinedAdjustedFitness;
+                        return first.combinedAdjustedFitness > second.combinedAdjustedFitness;
                     }
                 );
 
@@ -114,23 +115,15 @@ namespace NEAT
             }
 
             for (Species& s : species)
-                s.remainingOffspring = std::max(
-                    1u,
-                    random.round<std::uint32_t>(
-                        combinedSpeciesWeight
-                        ? populationSize * s.weight / combinedSpeciesWeight
-                        : static_cast<float>(populationSize) / species.size()
-                    )
-                );
+                s.remainingOffspring = std::max<std::uint32_t>(1, std::round(populationSize * s.weight / combinedSpeciesWeight));
 
             //TODO try out culling population-wide instead of per species
             // Cull each Species' weakest individuals
-            if (cullFactor > 0)
-                for (Species& s : species)
-                {
-                    std::ranges::sort(s.networks, [](const Network& first, const Network& second) { return second.adjustedFitness < first.adjustedFitness; });
-                    s.networks.resize(std::clamp<size_t>(s.networks.size() * cullFactor, 1, s.networks.size()));
-                }
+            for (Species& s : species)
+            {
+                std::ranges::sort(s.networks, [](const Network& first, const Network& second) { return first.adjustedFitness > second.adjustedFitness; });
+                s.networks.resize(std::clamp<std::size_t>(s.networks.size() * cullFactor, 1, s.networks.size()));
+            }
 
             // Insert previous species
             // NOTE: This initializes each kept Species with a temporary individual (its former champion)
@@ -145,10 +138,9 @@ namespace NEAT
 
             // Interspecies mating
             // TODO the chance should probably apply per species or crossover not per population
-            // TODO this does not reduce the remaining offspring of any species
-            // TODO all combinedSpeciesWeight == 0 checks should be able to be eliminated since it should never be 0
+            // TODO test
             random.repeatFractional(
-                [this, &random, &pN, c12, c3, deltaT]()
+                [this, &random, &pN, inheritDisabledChance, c12, c3, deltaT]()
                 {
                     float l1 = random.getFloat();
 
@@ -156,9 +148,7 @@ namespace NEAT
 
                     for (auto it1 = itB; it1 != species.end(); ++it1)
                     {
-                        float rP1 = combinedSpeciesWeight
-                            ? it1->weight / combinedSpeciesWeight
-                            : 1.0f / species.size();
+                        float rP1 = it1->weight / combinedSpeciesWeight;
 
                         if (l1 < rP1)
                         {
@@ -166,21 +156,23 @@ namespace NEAT
 
                             for (auto it2 = it1 == itB ? itB + 1 : itB; it2 != species.end(); ++it2 != it1 ? it2 : ++it2)
                             {
-                                float rP2 = combinedSpeciesWeight
-                                    ? it2->weight / combinedSpeciesWeight
-                                    : 1.0f / species.size();
+                                float rP2 = it2->weight / combinedSpeciesWeight;
 
                                 if (l2 < rP2)
+                                {
                                     pN.insertNetwork(
                                         random.getBool() ? *it1 : *it2,
                                         it1->getRandomPerformanceWeightedParent(random)->crossover(
                                             *it2->getRandomPerformanceWeightedParent(random),
-                                            random
+                                            random,
+                                            inheritDisabledChance
                                         ),
                                         c12,
                                         c3,
                                         deltaT
                                     );
+                                    return;
+                                }
                                 else
                                     l2 -= rP2;
                             }
@@ -188,26 +180,23 @@ namespace NEAT
                         else
                             l1 -= rP1;
                     }
-
                 },
                 interspeciesMatingChance
             );
 
             // Remaining Offspring Generation
-            // TODO crossover excludes other mutations
-            // TODO maybe mutations exclude each other in general
             for (Species& s : species)
                 while (s.remainingOffspring > 0)
                 {
                     auto it = s.getRandomPerformanceWeightedParent(random);
                     Network n = s.networks.size() > 1 && random.getFloat() < crossoverChance ?
-                        it->crossover(*s.getRandomPerformanceWeightedParent(random, it), random) :
+                        it->crossover(*s.getRandomPerformanceWeightedParent(random, it), random, inheritDisabledChance) :
                         *it;
 
                     random.repeatFractional(
                         [&n, &random, perturbChance, perturbAmount, randomWeightSpread]() mutable
                         {
-                            n = n.mutateWeight(
+                            n = n.mutateWeights(
                                 random,
                                 perturbChance,
                                 perturbAmount,
@@ -296,24 +285,28 @@ namespace NEAT
 
             for (Species& s : species)
             {
-                if (s.highestFitness - s.lowestFitness)
-                    for (Network& n : s.networks)
-                        s.combinedNetworkWeight += n.weight = rescale(
-                            n.fitness,
-                            s.lowestFitness,
-                            s.highestFitness,
-                            networkSelectionBaseline * (s.highestFitness - s.lowestFitness),
-                            s.highestFitness - s.lowestFitness
-                        );
+                for (Network& n : s.networks)
+                    s.combinedNetworkWeight += n.weight =
+                        s.highestFitness == s.lowestFitness
+                            ? 1.0f
+                            : rescale(
+                                n.fitness,
+                                s.lowestFitness,
+                                s.highestFitness,
+                                networkSelectionBaseline * (s.highestFitness - s.lowestFitness),
+                                s.highestFitness - s.lowestFitness
+                            );
 
-                if (highestSpeciesAdjustedFitness - lowestSpeciesAdjustedFitness)
-                    combinedSpeciesWeight += s.weight = rescale(
-                        s.combinedAdjustedFitness,
-                        lowestSpeciesAdjustedFitness,
-                        highestSpeciesAdjustedFitness,
-                        speciesOffspringBaseline * (highestSpeciesAdjustedFitness - lowestSpeciesAdjustedFitness),
-                        highestSpeciesAdjustedFitness - lowestSpeciesAdjustedFitness
-                    );
+                combinedSpeciesWeight += s.weight =
+                    highestSpeciesAdjustedFitness == lowestSpeciesAdjustedFitness
+                        ? 1.0f
+                        : rescale(
+                            s.combinedAdjustedFitness,
+                            lowestSpeciesAdjustedFitness,
+                            highestSpeciesAdjustedFitness,
+                            speciesOffspringBaseline * (highestSpeciesAdjustedFitness - lowestSpeciesAdjustedFitness),
+                            highestSpeciesAdjustedFitness - lowestSpeciesAdjustedFitness
+                        );
             }
 
             staleGenerations = highestFitness > previousHighestFitness ? 0 : staleGenerations + 1;

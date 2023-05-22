@@ -97,10 +97,15 @@ namespace NEAT
         float randomWeightSpread;
 
         // Chance for a connection enable mutation to occur
+        // TODO does this even exist in the paper??
         float connectionEnableChance;
 
         // Chance for a crossover to occur
         float crossoverChance;
+
+        // Chance for a connection to be disabled during crossover,
+        // if it is disabled for either parent
+        float inheritDisabledChance;
 
         // Chance for interspecies mating to occur
         float interspeciesMatingChance;
@@ -135,6 +140,7 @@ namespace NEAT
             float randomWeightSpread,
             float connectionEnableChance,
             float crossoverChance,
+            float inheritDisabledChance,
             float interspeciesMatingChance,
             float addNodeChance,
             float addConnectionChance,
@@ -158,6 +164,7 @@ namespace NEAT
             randomWeightSpread(randomWeightSpread),
             connectionEnableChance(connectionEnableChance),
             crossoverChance(crossoverChance),
+            inheritDisabledChance(inheritDisabledChance),
             interspeciesMatingChance(interspeciesMatingChance),
             addNodeChance(addNodeChance),
             addConnectionChance(addConnectionChance),
@@ -166,13 +173,16 @@ namespace NEAT
             assert(stalePopulationLimit > 0);
             assert(stalePopulationSurvivors >= 2);
             assert(staleSpeciesLimit > 0);
+            assert(speciesOffspringBaseline > 0.0f);
             assert(championSurvivalLimit > 1);
-            assert(cullFactor >= 0.0f && cullFactor <= 1.0f);
+            assert(cullFactor > 0.0f && cullFactor <= 1.0f);
+            assert(networkSelectionBaseline > 0.0f);
             assert(weightMutateChance > 0.0f);
             assert(perturbChance > 0.0f);
             assert(connectionEnableChance > 0.0f);
             assert(crossoverChance > 0.0f && crossoverChance <= 1.0f);
-            assert(interspeciesMatingChance > 0.0f);
+            assert(inheritDisabledChance > 0.0f);
+            assert(interspeciesMatingChance >= 0.0f);
             assert(addNodeChance > 0.0f);
             assert(addConnectionChance > 0.0f);
         }
@@ -203,6 +213,7 @@ namespace NEAT
                     weightMutateChance,
                     connectionEnableChance,
                     crossoverChance,
+                    inheritDisabledChance,
                     perturbChance,
                     perturbAmount,
                     interspeciesMatingChance,

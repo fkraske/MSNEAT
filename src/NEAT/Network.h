@@ -82,7 +82,7 @@ namespace NEAT
                     for (const auto& [in, data] : connections.at(out))
                         if (data.enabled)
                             finalOutput[out] += output[in] * data.weight; // TODO separate activation function for output layer
-                        }
+            }
 
             return finalOutput;
         }
@@ -91,7 +91,7 @@ namespace NEAT
         {
             auto flattened = getEdges();
             auto otherFlattened = other.getEdges();
-            auto matching = flattened | std::views::filter([&other](const Edge& e) { return other.containsEdge(e); });
+            auto matching = flattened | std::views::filter([&other](Edge e) { return other.containsEdge(e); });
 
             auto flattenedSize = std::ranges::distance(flattened);
             auto otherFlattenedSize = std::ranges::distance(otherFlattened);
@@ -116,7 +116,7 @@ namespace NEAT
             return c12 * ED / N + c3 * W <= deltaT;
         }
 
-        Network mutateWeight(
+        Network mutateWeights(
             Random& random,
             float perturbChance,
             float perturbAmount,
@@ -130,12 +130,14 @@ namespace NEAT
             if (edges.begin() == edges.end())
                 return result;
 
-            ConnectionData& c = result.getConnectionData(result.getRandomEdge(random));
-
-            c.weight =
-                random.getFloat() < perturbChance
-                ? c.weight * (1.0f + (random.getFloat() - 0.5f) * perturbAmount)
-                : 2.0f * (random.getFloat() - 0.5f) * randomWeightSpread;
+            for (Edge e : edges)
+            {
+                ConnectionData& c = result.getConnectionData(e);
+                c.weight =
+                    random.getFloat() < perturbChance
+                    ? c.weight + (2.0f * random.getFloat() - 1.0f) * perturbAmount // TODO this may have to scale the value instead of adding to it?
+                    : (2.0f * random.getFloat() - 1.0f) * randomWeightSpread;
+            }
 
             return result;
         }
@@ -183,6 +185,8 @@ namespace NEAT
 
                 if (inIt < outIt)
                     if (containsIndirectReverseConnection(inIt, outIt))
+                        // TODO this is wrong
+                        //  consider nodes: 0, 1, 2, 3 with (0, 2), (1, 3) and the proposed new connection (3, 0)
                         std::rotate(inIt, inIt + 1, outIt + 1);
                     else
                         return result;
@@ -198,6 +202,7 @@ namespace NEAT
             return result;
         }
 
+        // TODO this could add the same node twice before, hope it's fixed
         Network mutateAddNode(
             Random& random,
             NodeInnovationManager& nodeInnovationManager,
@@ -212,33 +217,49 @@ namespace NEAT
                 return result;
 
             Edge e = result.getRandomEdge(random);
-            ConnectionData& d = result.connections[e.second][e.first];
-            NodeID newNode = nodeInnovationManager.getInnovation(d.innovation);
+            ConnectionData& c = result.connections[e.second][e.first];
+            NodeID newNode = nodeInnovationManager.getInnovation(c.innovation);
 
-            d.enabled = false;
+            if (std::ranges::find(result.nodes, newNode) != result.nodes.end())
+                return result;
+
+            c.enabled = false;
 
             result.getConnectionData(e.first, newNode) = { connectionInnovationManager.getInnovation({ newNode, e.first }), 1.0f, true };
-            result.getConnectionData(newNode, e.second) = { connectionInnovationManager.getInnovation({ e.second, newNode }), d.weight, true };
+            result.getConnectionData(newNode, e.second) = { connectionInnovationManager.getInnovation({ e.second, newNode }), c.weight, true };
             result.nodes.insert(std::ranges::find(result.nodes, e.second), newNode);
             result.maxNodeID = std::max(maxNodeID, newNode + 1);
 
             return result;
         }
 
-        Network crossover(const Network& other, Random& random) const
+        Network crossover(const Network& other, Random& random, float inheritDisabledChance) const
         {
             Network result;
 
             const Network& moreFit = fitness > other.fitness ? *this : other;
-            const Network& lessFit = fitness <= other.fitness ? *this : other;
+            const Network& lessFit = this == &moreFit ? other : *this;
 
             result.nodes = moreFit.nodes;
             result.maxNodeID = moreFit.maxNodeID;
             result.connections = moreFit.connections;
 
             for (Edge e : moreFit.getEdges())
-                if (lessFit.containsEdgeWithInnovation(e, moreFit.getConnectionData(e).innovation) && random.getBool())
-                    result.getConnectionData(e) = lessFit.getConnectionData(e);
+            {
+                const ConnectionData& mfcd = moreFit.getConnectionData(e);
+                if (lessFit.containsEdgeWithInnovation(e, mfcd.innovation))
+                {
+                    const ConnectionData& lfcd = lessFit.getConnectionData(e);
+                    ConnectionData& rfcd = result.getConnectionData(e);
+
+                    if (random.getBool())
+                        rfcd = lfcd;
+
+                    if ((!mfcd.enabled || !lfcd.enabled) && random.getFloat() < inheritDisabledChance)
+                        rfcd.enabled = false;
+                }
+
+            }
 
             return result;
         }
@@ -294,11 +315,15 @@ namespace NEAT
             std::vector<NodeID>::reverse_iterator outIt
         ) const
         {
+            if (containsEdge(*outIt, *inIt))
+                true;
+
             for (auto it = inIt + 1; it < outIt; ++it)
                 if (containsEdge(*it, *inIt))
-                    return containsIndirectReverseConnection(it, outIt);
+                    if (containsIndirectReverseConnection(it, outIt))
+                        return true;
 
-            return containsEdge(*outIt, *inIt);
+            return false;
         }
 
         auto getEdges()
@@ -331,7 +356,7 @@ namespace NEAT
                 }) | std::views::join;
         }
 
-        std::string nodeInfo(int indent = 0)
+        std::string nodeInfo(int indent = 0) const
         {
             std::stringstream ss;
 
@@ -353,14 +378,14 @@ namespace NEAT
 
             for (const auto e : getEdges())
             {
-                const ConnectionData& data = getConnectionData(e);
+                const ConnectionData& c = getConnectionData(e);
 
                 ss  << std::string(indent + 1, '\t') << "{ "
                     << e.first << ", "
                     << e.second << ": "
-                    << data.innovation << ", "
-                    << data.weight << ", "
-                    << data.enabled << " }, \n";
+                    << c.innovation << ", "
+                    << c.weight << ", "
+                    << c.enabled << " }, \n";
             }
 
             ss << std::string(indent, '\t') << "}";
@@ -368,7 +393,7 @@ namespace NEAT
             return ss.str();
         }
 
-        std::string detailedInfo(int indent = 0)
+        std::string detailedInfo(int indent = 0) const
         {
             std::stringstream ss;
 

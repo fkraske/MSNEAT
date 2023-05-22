@@ -24,18 +24,15 @@ namespace NEAT
         Fitness lowestFitness = MAXIMUM_FITNESS;
 
         std::uint32_t remainingOffspring = 0;
-
         std::uint16_t staleGenerations = 0;
 
         auto getRandomPerformanceWeightedParent(Random& random) const
         {
-            float r = random.getFloat();
+            float r = random.getFloat() * combinedNetworkWeight;
 
             for (auto it = networks.begin(); it != networks.end(); ++it)
             {
-                float weight = combinedNetworkWeight
-                    ? it->weight / combinedNetworkWeight
-                    : 1.0f / networks.size();
+                float weight = it->weight;
 
                 if (r < weight)
                     return it;
@@ -48,15 +45,13 @@ namespace NEAT
 
         auto getRandomPerformanceWeightedParent(Random& random, std::vector<Network>::const_iterator ignore) const
         {
-            float r = random.getFloat() - (combinedNetworkWeight ? (ignore->weight / combinedNetworkWeight) : 1.0f / networks.size());
+            float r = random.getFloat() * combinedNetworkWeight - ignore->weight;
 
             auto itB = networks.begin();
 
             for (auto it = itB == ignore ? itB + 1 : itB; it != networks.end(); ++it != ignore ? it : ++it)
             {
-                float weight = combinedNetworkWeight
-                    ? it->weight / combinedNetworkWeight
-                    : 1.0f / networks.size();
+                float weight = it->weight;
 
                 if (r < weight)
                     return it;

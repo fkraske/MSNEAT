@@ -12,7 +12,7 @@ namespace XOR
     {
         inline float operator()(float x) const
         {
-            return 1 / (1 + std::exp(-4.9f * x));
+            return 1.0f / (1.0f + std::exp(-4.9f * x));
         }
     };
 
@@ -32,11 +32,17 @@ namespace XOR
     {
         inline NEAT::Fitness operator()(const Network& network)
         {
-            NEAT::Fitness f = 4
-                - std::abs(network.generateOutput({ 0, 0 })[0])
-                - std::abs(network.generateOutput({ 1, 0 })[0] - 1)
-                - std::abs(network.generateOutput({ 0, 1 })[0] - 1)
-                - std::abs(network.generateOutput({ 1, 1 })[0]);
+            float o00 = network.generateOutput({ 0, 0 })[0];
+            float o10 = network.generateOutput({ 1, 0 })[0];
+            float o01 = network.generateOutput({ 0, 1 })[0];
+            float o11 = network.generateOutput({ 1, 1 })[0];
+
+            NEAT::Fitness f = std::max(0.0f, 4
+                - std::abs(o00)
+                - std::abs(o10 - 1.0f)
+                - std::abs(o01 - 1.0f)
+                - std::abs(o11)
+            );
 
             return f * f;
         }
@@ -68,8 +74,18 @@ namespace XOR
         inline bool operator()(const Population::Snapshot& snapshot)
         {
             std::cout << "Generation: " << snapshot.generation << "\n\n" << snapshot.population.basicInfo() << "\n\n\n\n";
-            return snapshot.generation >= 100;
-            return snapshot.population.highestFitness > 15.5f;
+            //std::cout << "Generation: " << snapshot.generation << " - Highest Fitness: " << snapshot.population.highestFitness << "\n";
+
+            if (snapshot.generation >= 5000)
+                return true;
+
+            Network n = snapshot.population.getFittest();
+
+            return
+                std::round(n.generateOutput({ 0, 0 })[0]) == 0.0f &&
+                std::round(n.generateOutput({ 1, 0 })[0]) == 1.0f &&
+                std::round(n.generateOutput({ 0, 1 })[0]) == 1.0f &&
+                std::round(n.generateOutput({ 1, 1 })[0]) == 0.0f;
         }
     };
 
@@ -95,8 +111,9 @@ namespace XOR
             0.2f,
             0.8f,
             0.9f,
-            0.5f,
+            0.25f,
             1.0f,
+            0.75f,
             0.75f,
             0.75f,
             0.001f,
@@ -113,14 +130,14 @@ int main()
 {
     XOR::Simulation sim;
     auto r = sim.train();
-    XOR::Simulation::Network n = r.population.getFittest();
+    XOR::Network n = r.population.getFittest();
 
     std::cout << n.detailedInfo() << "\n";
     std::cout << n.generateOutput({ 0, 0 })[0] << "\n";
     std::cout << n.generateOutput({ 1, 0 })[0] << "\n";
     std::cout << n.generateOutput({ 0, 1 })[0] << "\n";
     std::cout << n.generateOutput({ 1, 1 })[0] << "\n";
-
+    
     //XOR::ConnectionInnovationManager m;
     //NEAT::Random r(1);
     //XOR::Network n;
