@@ -29,8 +29,8 @@ namespace NEAT
         using ConnectionMap = std::unordered_map<NodeID, std::unordered_map<NodeID, ConnectionData>>;
 
         Network() :
-            fitness(minimumFitness),
-            adjustedFitness(minimumFitness),
+            fitness(MINIMUM_FITNESS),
+            adjustedFitness(MINIMUM_FITNESS),
             weight(0),
             nodes(),
             maxNodeID(ToutCount + TinCount + 1),

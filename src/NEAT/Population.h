@@ -38,10 +38,10 @@ namespace NEAT
         ConnectionInnovationManager connectionInnovationManager;
 
         float combinedSpeciesWeight = 0;
-        Fitness highestFitness = minimumFitness;
-        Fitness previousHighestFitness = minimumFitness;
-        Fitness highestSpeciesAdjustedFitness = minimumFitness;
-        Fitness lowestSpeciesAdjustedFitness = maximumFitness;
+        Fitness highestFitness = MINIMUM_FITNESS;
+        Fitness previousHighestFitness = MINIMUM_FITNESS;
+        Fitness highestSpeciesAdjustedFitness = MINIMUM_FITNESS;
+        Fitness lowestSpeciesAdjustedFitness = MAXIMUM_FITNESS;
 
         std::uint16_t staleGenerations = 0;
 

@@ -16,12 +16,12 @@ namespace NEAT
 
         std::vector<Network> networks;
 
-        Fitness combinedAdjustedFitness = minimumFitness;
+        Fitness combinedAdjustedFitness = MINIMUM_FITNESS;
         float combinedNetworkWeight = 0;
         float weight = 0;
-        Fitness highestFitness = minimumFitness;
-        Fitness previousHighestFitness = minimumFitness;
-        Fitness lowestFitness = maximumFitness;
+        Fitness highestFitness = MINIMUM_FITNESS;
+        Fitness previousHighestFitness = MINIMUM_FITNESS;
+        Fitness lowestFitness = MAXIMUM_FITNESS;
 
         std::uint32_t remainingOffspring = 0;
 
